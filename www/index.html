@@ -193,7 +193,7 @@ a{color:var(--accent);}
   <div class="view" id="view-history"></div>
   <div class="view" id="view-about">
     <div class="card">
-      <div class="sectionhead"><h2 style="font-size:18px;">UNO Scoreboard</h2><span class="muted">v1.8.0</span></div>
+      <div class="sectionhead"><h2 style="font-size:18px;">UNO Scoreboard</h2><span class="muted">v1.9.0</span></div>
       <div class="muted">UNO Scoreboard helps you track players, rounds, and running totals for UNO matches — first to 500 points wins.</div>
     </div>
     <div class="card">
@@ -1011,8 +1011,8 @@ a{color:var(--accent);}
     el.innerHTML =
       '<div class="card">' +
         '<div class="sectionhead"><h2 style="font-size:17px;">Export</h2></div>' +
-        '<div class="muted" style="margin-bottom:10px;">Share your players and match history to another device (e.g. via WhatsApp, Email, Drive). On the other phone, paste it into Import below.</div>' +
-        '<button class="primary" id="export-btn">Share backup</button>' +
+        '<div class="muted" style="margin-bottom:10px;">Save your players and match history as a backup file — share it to Drive, email, or another app.</div>' +
+        '<button class="primary" id="export-btn">Export backup file</button>' +
         '<div id="export-fallback" style="margin-top:12px;display:none;">' +
           '<label class="field">Backup data (copy this text)</label>' +
           '<textarea id="export-text" readonly></textarea>' +
@@ -1020,22 +1020,41 @@ a{color:var(--accent);}
       '</div>' +
       '<div class="card">' +
         '<div class="sectionhead"><h2 style="font-size:17px;">Import</h2></div>' +
-        '<div class="muted" style="margin-bottom:10px;">Paste backup text from another device. This replaces all players and match history on this phone.</div>' +
-        '<textarea id="import-text" placeholder="Paste backup JSON here"></textarea>' +
-        '<div class="row" style="margin-top:10px;">' +
-          '<button class="primary grow" id="import-btn">Import &amp; Replace</button>' +
-        '</div>' +
+        '<div class="muted" style="margin-bottom:10px;">Pick a backup file from this device. This replaces all players and match history on this phone.</div>' +
+        '<input type="file" id="import-file-input" accept="application/json,.json" hidden>' +
+        '<button class="primary grow" id="import-backup-btn">Choose backup file…</button>' +
       '</div>';
 
     document.getElementById('export-btn').addEventListener('click', async function(){
       var json = JSON.stringify(state, null, 2);
+      try{
+        var plugins = (window.Capacitor && window.Capacitor.Plugins) || {};
+        var Filesystem = plugins.Filesystem;
+        var Share = plugins.Share;
+        if(Filesystem && Share){
+          var filename = 'uno-scoreboard-backup.json';
+          var writeResult = await Filesystem.writeFile({
+            path: filename,
+            data: json,
+            directory: 'CACHE',
+            encoding: 'utf8'
+          });
+          await Share.share({
+            title: 'UNO Scoreboard backup',
+            dialogTitle: 'Save or share backup',
+            url: writeResult.uri
+          });
+          return;
+        }
+      }catch(e){ console.error(e); /* fall through to text fallback below */ }
+      // Fallback (e.g. running outside the native app): share as text, or show it to copy.
       var shared = false;
       try{
         if(navigator.share){
           await navigator.share({ title: 'UNO Scoreboard backup', text: json });
           shared = true;
         }
-      }catch(e){ /* user cancelled or share failed; fall through to fallback */ }
+      }catch(e){ /* user cancelled or share failed; fall through to text box */ }
       if(!shared){
         var box = document.getElementById('export-fallback');
         var ta = document.getElementById('export-text');
@@ -1046,21 +1065,31 @@ a{color:var(--accent);}
       }
     });
 
-    document.getElementById('import-btn').addEventListener('click', function(){
-      var text = document.getElementById('import-text').value.trim();
-      if(!text) return;
-      var parsed;
-      try{ parsed = JSON.parse(text); }catch(e){ alert('That doesn\'t look like valid backup text.'); return; }
-      if(!parsed || !Array.isArray(parsed.players) || !Array.isArray(parsed.matches)){
-        alert('That doesn\'t look like a UNO Scoreboard backup.');
-        return;
-      }
-      showConfirm('Replace all players and match history on this phone with the imported backup?', function(){
-        state = migrateState(parsed);
-        save();
-        alert('Backup imported.');
-        document.getElementById('import-text').value = '';
-      });
+    var importFileInput = document.getElementById('import-file-input');
+    document.getElementById('import-backup-btn').addEventListener('click', function(){
+      importFileInput.click();
+    });
+    importFileInput.addEventListener('change', function(){
+      var file = importFileInput.files[0];
+      if(!file) return;
+      var reader = new FileReader();
+      reader.onload = function(){
+        var parsed;
+        try{ parsed = JSON.parse(reader.result); }catch(e){ alert('That file doesn\'t look like valid backup JSON.'); importFileInput.value = ''; return; }
+        if(!parsed || !Array.isArray(parsed.players) || !Array.isArray(parsed.matches)){
+          alert('That doesn\'t look like a UNO Scoreboard backup.');
+          importFileInput.value = '';
+          return;
+        }
+        showConfirm('Replace all players and match history on this phone with the imported backup?', function(){
+          state = migrateState(parsed);
+          save();
+          alert('Backup imported.');
+          importFileInput.value = '';
+        });
+      };
+      reader.onerror = function(){ alert('Failed to read that file.'); importFileInput.value = ''; };
+      reader.readAsText(file);
     });
   }
 
